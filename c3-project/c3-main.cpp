@@ -47,16 +47,21 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event, void*
   	//boost::shared_ptr<pcl::visualization::PCLVisualizer> viewer = *static_cast<boost::shared_ptr<pcl::visualization::PCLVisualizer> *>(viewer_void);
 	if (event.getKeySym() == "Right" && event.keyDown()){
 		cs.push_back(ControlState(0, -0.02, 0));
-  	}
+		std::cout << "STEERING right" << std::endl;
+    }
 	else if (event.getKeySym() == "Left" && event.keyDown()){
 		cs.push_back(ControlState(0, 0.02, 0)); 
-  	}
+ 		std::cout << "STEERING left" << std::endl;
+ 	}
   	if (event.getKeySym() == "Up" && event.keyDown()){
 		cs.push_back(ControlState(0.1, 0, 0));
+		std::cout << "ACCELERATING" << std::endl;
   	}
 	else if (event.getKeySym() == "Down" && event.keyDown()){
 		cs.push_back(ControlState(-0.1, 0, 0)); 
-  	}
+		std::cout << "DECELERATINGgit " << std::endl;
+
+    }
 	if(event.getKeySym() == "a" && event.keyDown()){
 		refresh_view = true;
 	}
@@ -98,6 +103,38 @@ void drawCar(Pose pose, int num, Color color, double alpha, pcl::visualization::
     box.cube_height = 2;
 	renderBox(viewer, box, num, color, alpha);
 }
+
+
+/////////////////////////////////////////////////////////////////// STUDENT ADDED //////////////////////
+// PCL docs: https://pointclouds.org/documentation/
+
+// Filter the voxel grid for efficiency. filterRes of 0.5 was used in "Utilizing Scan Matching" 7
+void filterWithVoxelGrid(pcl::PointCloud<PointT>::Ptr outFiltered, pcl::PointCloud<PointT>::Ptr inCloud, double filterRes = 1.0)
+{
+	pcl::VoxelGrid<PointT> vg;
+	vg.setInputCloud(inCloud);
+	vg.setLeafSize(filterRes, filterRes, filterRes);
+	vg.filter(*outFiltered);
+}
+
+// NDT application, see also https://pointclouds.org/documentation/tutorials/normal_distributions_transform.html
+void NDT(pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ>& ndt, PointCloudT::Ptr source, Pose startingPose, int iterations)
+{
+	Eigen::Matrix4f startingPoseMatrix = transform3D(
+		startingPose.rotation.yaw, startingPose.rotation.pitch, startingPose.rotation.roll,
+		startingPose.position.x, startingPose.position.y, startingPose.position.z).cast<float>();
+
+	ndt.setMaximumIterations (iterations);
+	ndt.setInputSource (source);
+
+	// Calculating required rigid transform to align the input cloud to the target cloud.
+	pcl::PointCloud<pcl::PointXYZ>::Ptr outputCloud (new pcl::PointCloud<pcl::PointXYZ>);
+	ndt.align (*outputCloud, startingPoseMatrix);
+
+    std::cout << "NDT done: hasConvered=" << ndt.hasConverged() << " fitness=" << ndt.getFitnessScore() << std::endl;
+}
+/////////////////////////////////////////////////////////////// END STUDENT ADDED //////////////////////
+
 
 int main(){
 
@@ -144,6 +181,18 @@ int main(){
 
 	typename pcl::PointCloud<PointT>::Ptr cloudFiltered (new pcl::PointCloud<PointT>);
 	typename pcl::PointCloud<PointT>::Ptr scanCloud (new pcl::PointCloud<PointT>);
+
+	/////////////////////////////////////////////////////////////////// STUDENT ADDED //////////////////////
+	// For NDT don't want to have have to build the NDT mapping space every time, that would be very inefficient, see "Utilizing Scan Matching: 9 Using NDT to align"
+	// see also https://pointclouds.org/documentation/tutorials/normal_distributions_transform.html
+	pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt{};
+	ndt.setInputTarget (mapCloud);
+
+	// Setting scale dependent NDT parameters
+	ndt.setTransformationEpsilon (0.01);   // Setting minimum transformation difference for termination condition.
+	ndt.setStepSize (0.1);                 // Setting maximum step size for More-Thuente line search.
+	ndt.setResolution (1.0);               // Setting Resolution of NDT grid structure (VoxelGridCovariance).
+	/////////////////////////////////////////////////////////////// END STUDENT ADDED //////////////////////
 
 	lidar->Listen([&new_scan, &lastScanTime, &scanCloud](auto data){
 
@@ -200,20 +249,28 @@ int main(){
 		if(!new_scan){
 			
 			new_scan = true;
-			// TODO: (Filter scan using voxel filter)
 
-			// TODO: Find pose transform by using ICP or NDT matching
-			//pose = ....
+			/////////////////////////////////////////////////////////////////// STUDENT MODIFIED //////////////////////
+			// Step1 TODO: (Filter scan using voxel filter)
+			filterWithVoxelGrid(cloudFiltered, scanCloud);
 
-			// TODO: Transform scan so it aligns with ego's actual pose and render that scan
+			// Step2: TODO: Find pose transform by using ICP or NDT matching
+			NDT(ndt, cloudFiltered, pose, 35);
+			pose = getPose(ndt.getFinalTransformation().cast<double>());
+
+			// Step3: TODO: Transform scan so it aligns with ego's actual pose and render that scan
+			PointCloudT::Ptr transformedScanFromActualPose (new PointCloudT);
+			pcl::transformPointCloud (*cloudFiltered, *transformedScanFromActualPose, ndt.getFinalTransformation());
 
 			viewer->removePointCloud("scan");
 			// TODO: Change `scanCloud` below to your transformed scan
-			renderPointCloud(viewer, scanCloud, "scan", Color(1,0,0) );
+			//renderPointCloud(viewer, scanCloud, "scan", Color(1,0,0) );
+			renderPointCloud(viewer, transformedScanFromActualPose, "scan", Color(1,0,0) );
+			/////////////////////////////////////////////////////////////// END STUDENT MODIFIED //////////////////////
 
 			viewer->removeAllShapes();
 			drawCar(pose, 1,  Color(0,1,0), 0.35, viewer);
-          
+
           	double poseError = sqrt( (truePose.position.x - pose.position.x) * (truePose.position.x - pose.position.x) + (truePose.position.y - pose.position.y) * (truePose.position.y - pose.position.y) );
 			if(poseError > maxError)
 				maxError = poseError;

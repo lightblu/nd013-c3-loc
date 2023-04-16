@@ -35,6 +35,12 @@ using namespace std;
 #include <pcl/registration/ndt.h>
 #include <pcl/console/time.h>   // TicToc
 
+// Mataparams
+#define ITERATIONS (3)
+#define NDT_RESOLUTION (1.0)
+#define FILTER_RESOLUTION (0.5)
+
+
 PointCloudT pclCloud;
 cc::Vehicle::Control control;
 std::chrono::time_point<std::chrono::system_clock> currentTime;
@@ -59,7 +65,7 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event, void*
   	}
 	else if (event.getKeySym() == "Down" && event.keyDown()){
 		cs.push_back(ControlState(-0.1, 0, 0)); 
-		std::cout << "DECELERATINGgit " << std::endl;
+		std::cout << "DECELERATING " << std::endl;
 
     }
 	if(event.getKeySym() == "a" && event.keyDown()){
@@ -109,7 +115,7 @@ void drawCar(Pose pose, int num, Color color, double alpha, pcl::visualization::
 // PCL docs: https://pointclouds.org/documentation/
 
 // Filter the voxel grid for efficiency. filterRes of 0.5 was used in "Utilizing Scan Matching" 7
-void filterWithVoxelGrid(pcl::PointCloud<PointT>::Ptr outFiltered, pcl::PointCloud<PointT>::Ptr inCloud, double filterRes = 1.0)
+void filterWithVoxelGrid(pcl::PointCloud<PointT>::Ptr outFiltered, pcl::PointCloud<PointT>::Ptr inCloud, double filterRes = FILTER_RESOLUTION)
 {
 	pcl::VoxelGrid<PointT> vg;
 	vg.setInputCloud(inCloud);
@@ -153,7 +159,8 @@ int main(){
 	auto lidar_bp = *(blueprint_library->Find("sensor.lidar.ray_cast"));
 	// CANDO: Can modify lidar values to get different scan resolutions
 	lidar_bp.SetAttribute("upper_fov", "15");
-    lidar_bp.SetAttribute("lower_fov", "-25");
+    //lidar_bp.SetAttribute("lower_fov", "-25");
+    lidar_bp.SetAttribute("lower_fov", "-5");
     lidar_bp.SetAttribute("channels", "32");
     lidar_bp.SetAttribute("range", "30");
 	lidar_bp.SetAttribute("rotation_frequency", "60");
@@ -189,9 +196,11 @@ int main(){
 	ndt.setInputTarget (mapCloud);
 
 	// Setting scale dependent NDT parameters
-	ndt.setTransformationEpsilon (0.01);   // Setting minimum transformation difference for termination condition.
-	ndt.setStepSize (0.1);                 // Setting maximum step size for More-Thuente line search.
-	ndt.setResolution (1.0);               // Setting Resolution of NDT grid structure (VoxelGridCovariance).
+	ndt.setTransformationEpsilon(1e-6); // (0.01);   // Setting minimum transformation difference for termination condition.
+	ndt.setStepSize (1);                 // Setting maximum step size for More-Thuente line search.
+	ndt.setResolution (NDT_RESOLUTION);               // Setting Resolution of NDT grid structure (VoxelGridCovariance).
+  
+  	Pose previousPose{pose};
 	/////////////////////////////////////////////////////////////// END STUDENT ADDED //////////////////////
 
 	lidar->Listen([&new_scan, &lastScanTime, &scanCloud](auto data){
@@ -255,8 +264,15 @@ int main(){
 			filterWithVoxelGrid(cloudFiltered, scanCloud);
 
 			// Step2: TODO: Find pose transform by using ICP or NDT matching
-			NDT(ndt, cloudFiltered, pose, 35);
-			pose = getPose(ndt.getFinalTransformation().cast<double>());
+			Pose posePredicted{Point(
+				pose.position.x + (pose.position.x - previousPose.position.x),
+				pose.position.y + (pose.position.y - previousPose.position.y),
+				pose.position.z + (pose.position.z - previousPose.position.z)), pose.rotation};
+                                    
+			NDT(ndt, cloudFiltered, posePredicted, ITERATIONS); // 4); // 35 too high
+
+          	previousPose = pose;
+            pose = getPose(ndt.getFinalTransformation().cast<double>());
 
 			// Step3: TODO: Transform scan so it aligns with ego's actual pose and render that scan
 			PointCloudT::Ptr transformedScanFromActualPose (new PointCloudT);

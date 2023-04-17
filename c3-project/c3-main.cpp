@@ -190,17 +190,18 @@ int main(){
 	typename pcl::PointCloud<PointT>::Ptr scanCloud (new pcl::PointCloud<PointT>);
 
 	/////////////////////////////////////////////////////////////////// STUDENT ADDED //////////////////////
-	// For NDT don't want to have have to build the NDT mapping space every time, that would be very inefficient, see "Utilizing Scan Matching: 9 Using NDT to align"
+	// For NDT don't want to have have to build the NDT mapping space every time, that would be very inefficient,
+	// see also "Utilizing Scan Matching: 9 Using NDT to align"
 	// see also https://pointclouds.org/documentation/tutorials/normal_distributions_transform.html
 	pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt{};
 	ndt.setInputTarget (mapCloud);
 
 	// Setting scale dependent NDT parameters
 	ndt.setTransformationEpsilon(1e-6); // (0.01);   // Setting minimum transformation difference for termination condition.
-	ndt.setStepSize (1);                 // Setting maximum step size for More-Thuente line search.
-	ndt.setResolution (NDT_RESOLUTION);               // Setting Resolution of NDT grid structure (VoxelGridCovariance).
+	ndt.setStepSize (1);                             // Setting maximum step size for More-Thuente line search.
+	ndt.setResolution (NDT_RESOLUTION);              // Setting Resolution of NDT grid structure (VoxelGridCovariance).
   
-  	Pose previousPose{pose};
+  	Pose previousPose{pose};                         // We keep track of also the previous pose to predict the next a bit.
 	/////////////////////////////////////////////////////////////// END STUDENT ADDED //////////////////////
 
 	lidar->Listen([&new_scan, &lastScanTime, &scanCloud](auto data){
@@ -271,8 +272,8 @@ int main(){
                                     
 			NDT(ndt, cloudFiltered, posePredicted, ITERATIONS); // 4); // 35 too high
 
-          	previousPose = pose;
-            pose = getPose(ndt.getFinalTransformation().cast<double>());
+			previousPose = pose;
+			pose = getPose(ndt.getFinalTransformation().cast<double>());
 
 			// Step3: TODO: Transform scan so it aligns with ego's actual pose and render that scan
 			PointCloudT::Ptr transformedScanFromActualPose (new PointCloudT);
